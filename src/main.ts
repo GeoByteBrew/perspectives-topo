@@ -13,7 +13,7 @@ import {
   WATER_STYLE,
   GREEN_STYLE,
 } from './geometry/overlays';
-import { Preview } from './preview';
+import { Preview, type ModelMeta } from './preview';
 import { downloadStl } from './export/stl';
 import { downloadThreeMf, NamedBody } from './export/threeMf';
 import { createMap, setupSearch } from './map';
@@ -35,6 +35,10 @@ const btnDownload3mf = el<HTMLButtonElement>('#btn-download-3mf');
 const status = el<HTMLSpanElement>('#status');
 const mapHint = el<HTMLDivElement>('#map-hint');
 const previewEmpty = el<HTMLDivElement>('#preview-empty');
+const previewMeta = el<HTMLElement>('#preview-meta');
+const previewMetaScale = el<HTMLElement>('#preview-meta-scale');
+const previewMetaDims = el<HTMLElement>('#preview-meta-dims');
+const previewMetaGround = el<HTMLElement>('#preview-meta-ground');
 
 let selection: Bounds | null = null;
 let exportBodies: NamedBody[] = [];
@@ -139,7 +143,17 @@ async function generate(): Promise<void> {
       }
     }
 
-    preview.show(bodies);
+    const heightMm = modelHeightMm(bodies);
+    const meta: ModelMeta = {
+      widthMm: space.widthMm,
+      depthMm: space.depthMm,
+      heightMm,
+      scaleRatio: (wM * 1000) / space.widthMm,
+      groundWidthM: wM,
+      groundDepthM: hM,
+    };
+    preview.show(bodies, meta);
+    showPreviewMeta(meta);
     previewEmpty.hidden = true;
     exportBodies = bodies;
     btnDownload.disabled = false;
@@ -147,7 +161,7 @@ async function generate(): Promise<void> {
 
     const tris = bodies.reduce((n, b) => n + b.geometry.getAttribute('position').count / 3, 0);
     setStatus(
-      `Terminé — ${space.widthMm.toFixed(0)}×${space.depthMm.toFixed(0)} mm, ` +
+      `Terminé — ${fmtMm(space.widthMm)} × ${fmtMm(space.depthMm)} × ${fmtMm(heightMm)} mm, ` +
         `${Math.round(tris).toLocaleString('fr-FR')} triangles (${dem.source})`,
     );
   } catch (err) {
@@ -157,6 +171,39 @@ async function generate(): Promise<void> {
     generating = false;
     btnGenerate.disabled = selection === null;
   }
+}
+
+function modelHeightMm(bodies: NamedBody[]): number {
+  let maxZ = 0;
+  for (const body of bodies) {
+    body.geometry.computeBoundingBox();
+    const box = body.geometry.boundingBox;
+    if (box) maxZ = Math.max(maxZ, box.max.z);
+  }
+  return maxZ;
+}
+
+function fmtMm(mm: number): string {
+  return mm < 10 ? mm.toFixed(1) : Math.round(mm).toString();
+}
+
+function fmtScale(ratio: number): string {
+  return `1:${new Intl.NumberFormat('fr-FR', { maximumSignificantDigits: 3 }).format(ratio)}`;
+}
+
+function fmtGround(m: number): string {
+  if (m < 1000) return `${Math.round(m)} m`;
+  const km = m / 1000;
+  return `${km < 10 ? km.toFixed(1).replace('.', ',') : Math.round(km)} km`;
+}
+
+function showPreviewMeta(meta: ModelMeta): void {
+  previewMeta.hidden = false;
+  previewMetaScale.textContent = `Échelle ${fmtScale(meta.scaleRatio)}`;
+  previewMetaDims.textContent =
+    `Modèle ${fmtMm(meta.widthMm)} × ${fmtMm(meta.depthMm)} × ${fmtMm(meta.heightMm)} mm`;
+  previewMetaGround.textContent =
+    `Terrain ${fmtGround(meta.groundWidthM)} × ${fmtGround(meta.groundDepthM)}`;
 }
 
 btnGenerate.addEventListener('click', () => void generate());

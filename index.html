@@ -46,18 +46,23 @@
         <section id="preview-pane">
           <canvas id="preview"></canvas>
           <div id="preview-empty">Le modèle généré apparaîtra ici</div>
+          <aside id="preview-meta" hidden aria-live="polite">
+            <p class="preview-meta-scale" id="preview-meta-scale"></p>
+            <p class="preview-meta-dims" id="preview-meta-dims"></p>
+            <p class="preview-meta-ground" id="preview-meta-ground"></p>
+          </aside>
         </section>
       </main>
       <footer id="controls">
-        <label>
+        <label title="Largeur est-ouest du modèle imprimé, en millimètres. La profondeur suit le rapport de la zone choisie.">
           Largeur
           <input id="opt-width" type="number" min="20" max="400" step="5" value="120" /> mm
         </label>
-        <label>
+        <label title="Exagération verticale : multiplie le relief et les hauteurs (1 = réel, 1,5 = plus marqué).">
           Vertical &times;
           <input id="opt-zscale" type="number" min="0.5" max="5" step="0.1" value="1.5" />
         </label>
-        <label>
+        <label title="Épaisseur du socle plat sous le terrain, en millimètres.">
           Base
           <input id="opt-base" type="number" min="1" max="30" step="1" value="4" /> mm
         </label>

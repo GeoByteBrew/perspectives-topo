@@ -6,6 +6,17 @@ export interface PreviewItem {
   color: number;
 }
 
+/** Print-size info shown on the model and in the preview HUD. */
+export interface ModelMeta {
+  widthMm: number;
+  depthMm: number;
+  heightMm: number;
+  /** Real-world / model, e.g. 12500 for 1:12 500. */
+  scaleRatio: number;
+  groundWidthM: number;
+  groundDepthM: number;
+}
+
 /** Three.js viewport for the generated model. Geometries are Z-up mm. */
 export class Preview {
   private renderer: THREE.WebGLRenderer;
@@ -13,6 +24,7 @@ export class Preview {
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
   private group = new THREE.Group();
+  private dimsGroup = new THREE.Group();
 
   constructor(private canvas: HTMLCanvasElement) {
     // preserveDrawingBuffer lets snapshot() read pixels for 3MF thumbnails.
@@ -26,6 +38,7 @@ export class Preview {
     // Model space is Z-up; rotate into Three's Y-up for display.
     this.group.rotation.x = -Math.PI / 2;
     this.scene.add(this.group);
+    this.group.add(this.dimsGroup);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.4));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -41,7 +54,7 @@ export class Preview {
   }
 
   /** Render layered geometries; the first item is used to frame the camera. */
-  show(items: PreviewItem[]): void {
+  show(items: PreviewItem[], meta?: ModelMeta): void {
     this.clear();
     items.forEach(({ geometry, color }, i) => {
       // Bodies share coplanar faces (base/terrain walls, embedded slabs);
@@ -55,6 +68,51 @@ export class Preview {
       this.group.add(new THREE.Mesh(geometry, material));
     });
     if (items.length > 0) this.fit(items[0].geometry);
+    if (meta) this.drawDimensions(meta);
+  }
+
+  private drawDimensions(meta: ModelMeta): void {
+    const w = meta.widthMm;
+    const d = meta.depthMm;
+    const h = meta.heightMm;
+    const hx = w / 2;
+    const hy = d / 2;
+    // Offset ticks slightly outside the footprint so they stay readable.
+    const pad = Math.max(w, d) * 0.04;
+
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xe8a33d, transparent: true, opacity: 0.9 });
+    const addLine = (points: THREE.Vector3[]) => {
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      this.dimsGroup.add(new THREE.Line(geo, lineMat));
+    };
+
+    // Width (X) along the south edge, in front of the model.
+    const yFront = -hy - pad;
+    addLine([new THREE.Vector3(-hx, yFront, 0), new THREE.Vector3(hx, yFront, 0)]);
+    addLine([new THREE.Vector3(-hx, yFront - pad * 0.4, 0), new THREE.Vector3(-hx, yFront + pad * 0.4, 0)]);
+    addLine([new THREE.Vector3(hx, yFront - pad * 0.4, 0), new THREE.Vector3(hx, yFront + pad * 0.4, 0)]);
+
+    // Depth (Y) along the west edge.
+    const xLeft = -hx - pad;
+    addLine([new THREE.Vector3(xLeft, -hy, 0), new THREE.Vector3(xLeft, hy, 0)]);
+    addLine([new THREE.Vector3(xLeft - pad * 0.4, -hy, 0), new THREE.Vector3(xLeft + pad * 0.4, -hy, 0)]);
+    addLine([new THREE.Vector3(xLeft - pad * 0.4, hy, 0), new THREE.Vector3(xLeft + pad * 0.4, hy, 0)]);
+
+    // Height (Z) at the south-west corner.
+    addLine([new THREE.Vector3(-hx, -hy, 0), new THREE.Vector3(-hx, -hy, h)]);
+    addLine([
+      new THREE.Vector3(-hx - pad * 0.35, -hy, 0),
+      new THREE.Vector3(-hx + pad * 0.35, -hy, 0),
+    ]);
+    addLine([
+      new THREE.Vector3(-hx - pad * 0.35, -hy, h),
+      new THREE.Vector3(-hx + pad * 0.35, -hy, h),
+    ]);
+
+    const fmt = (mm: number) => `${mm < 10 ? mm.toFixed(1) : Math.round(mm)} mm`;
+    this.dimsGroup.add(makeLabel(fmt(w), new THREE.Vector3(0, yFront - pad * 0.9, 0), Math.max(w, d)));
+    this.dimsGroup.add(makeLabel(fmt(d), new THREE.Vector3(xLeft - pad * 0.9, 0, 0), Math.max(w, d)));
+    this.dimsGroup.add(makeLabel(fmt(h), new THREE.Vector3(-hx - pad * 1.1, -hy, h / 2), Math.max(w, d)));
   }
 
   private fit(reference: THREE.BufferGeometry): void {
@@ -72,11 +130,15 @@ export class Preview {
 
   private clear(): void {
     for (const child of [...this.group.children]) {
-      this.group.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        (child.material as THREE.Material).dispose();
+      if (child === this.dimsGroup) {
+        for (const dim of [...this.dimsGroup.children]) {
+          this.dimsGroup.remove(dim);
+          disposeObject(dim);
+        }
+        continue;
       }
+      this.group.remove(child);
+      disposeObject(child);
     }
   }
 
@@ -103,4 +165,64 @@ export class Preview {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
+}
+
+function makeLabel(text: string, position: THREE.Vector3, modelSize: number): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(16, 18, 20, 0.82)';
+  ctx.strokeStyle = 'rgba(232, 163, 61, 0.9)';
+  ctx.lineWidth = 2;
+  roundRect(ctx, 8, 8, 240, 48, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#f2efe8';
+  ctx.font = '600 28px ui-sans-serif, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 34);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.copy(position);
+  const scale = Math.max(12, modelSize * 0.18);
+  sprite.scale.set(scale, scale * 0.25, 1);
+  return sprite;
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function disposeObject(obj: THREE.Object3D): void {
+  if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.Sprite) {
+    obj.geometry?.dispose();
+    const mat = obj.material;
+    if (Array.isArray(mat)) mat.forEach((m) => disposeMaterial(m));
+    else if (mat) disposeMaterial(mat);
+  }
+}
+
+function disposeMaterial(mat: THREE.Material): void {
+  const m = mat as THREE.MeshStandardMaterial & { map?: THREE.Texture | null };
+  m.map?.dispose();
+  mat.dispose();
 }
