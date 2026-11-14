@@ -17,6 +17,7 @@ import { Preview, type ModelMeta } from './preview';
 import { downloadStl } from './export/stl';
 import { downloadThreeMf, NamedBody } from './export/threeMf';
 import { createMap, setupSearch } from './map';
+import { resolvePrintWidthMm, setupTools } from './tools';
 
 const COLORS = {
   base: 0x3d3a36,
@@ -50,6 +51,15 @@ const mapController = createMap(el('#map'), (bounds) => {
   mapHint.hidden = bounds !== null;
 });
 setupSearch(mapController);
+setupTools(mapController, {
+  onHint: (text) => {
+    mapHint.hidden = false;
+    mapHint.textContent = text;
+  },
+  syncPrintWidth: (widthMm) => {
+    el<HTMLInputElement>('#opt-width').value = String(Math.round(widthMm));
+  },
+});
 
 const preview = new Preview(el<HTMLCanvasElement>('#preview'));
 
@@ -68,7 +78,6 @@ async function generate(): Promise<void> {
   btnDownload3mf.disabled = true;
 
   try {
-    const widthMm = Number(el<HTMLInputElement>('#opt-width').value) || 120;
     const zFactor = Number(el<HTMLInputElement>('#opt-zscale').value) || 1.5;
     const baseMm = Number(el<HTMLInputElement>('#opt-base').value) || 4;
     const layers = {
@@ -81,10 +90,15 @@ async function generate(): Promise<void> {
 
     const wM = widthMeters(bounds);
     const hM = heightMeters(bounds);
-    if (wM < 50 || hM < 50) throw new Error('Sélection trop petite — dessinez un plus grand rectangle.');
+    if (wM < 50 || hM < 50) throw new Error('Sélection trop petite — choisissez une plus grande zone.');
     if (wM > 60000 || hM > 60000) throw new Error('Sélection trop grande — restez sous ~60 km.');
     if (wantDetails && (wM > 6000 || hM > 6000)) {
       throw new Error('Les détails de carte demandent une sélection sous ~6 km — réduisez-la ou décochez les calques.');
+    }
+
+    const widthMm = resolvePrintWidthMm(wM);
+    if (widthMm < 20 || widthMm > 400) {
+      throw new Error('Largeur d’impression hors limites (20–400 mm).');
     }
 
     setStatus('Récupération du relief…');

@@ -3,26 +3,52 @@ import '@geoman-io/leaflet-geoman-free';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { Bounds } from './geo';
+import {
+  LonLatRing,
+  boundsFromCenter,
+  circleRing,
+  heartRing,
+  rectangleRing,
+  triangleRing,
+} from './shapes';
 
 export interface MapController {
   map: L.Map;
   getSelection(): Bounds | null;
+  getFootprint(): LonLatRing | null;
   flyTo(bounds: Bounds): void;
+  placeRectangle(widthM: number, heightM: number, center?: { lat: number; lon: number }): void;
+  placeCircle(radiusM: number, center?: { lat: number; lon: number }): void;
+  placeTriangle(sizeM: number, center?: { lat: number; lon: number }): void;
+  placeHeart(sizeM: number, center?: { lat: number; lon: number }): void;
+  /** Next map click places the pending shape (or cancels if null). */
+  armClickPlace(handler: ((lat: number, lon: number) => void) | null): void;
+  clearSelection(): void;
 }
+
+const MONTPELLIER = { lat: 43.6108, lon: 3.8767 };
+
+const STYLE: L.PathOptions = {
+  color: '#e8a33d',
+  weight: 2,
+  fillColor: '#e8a33d',
+  fillOpacity: 0.18,
+};
 
 export function createMap(
   container: HTMLElement,
   onSelectionChange: (bounds: Bounds | null) => void,
 ): MapController {
-  const map = L.map(container, { zoomControl: true }).setView([43.2557, -79.8711], 13);
+  const map = L.map(container, { zoomControl: true }).setView([MONTPELLIER.lat, MONTPELLIER.lon], 14);
 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
 
+  // Freehand rectangle remains available; precise tools live in the left panel.
   map.pm.addControls({
-    position: 'topleft',
+    position: 'topright',
     drawMarker: false,
     drawCircleMarker: false,
     drawPolyline: false,
@@ -37,39 +63,115 @@ export function createMap(
     removalMode: true,
   });
 
-  let selection: L.Rectangle | null = null;
+  let selectionLayer: L.Polygon | L.Rectangle | null = null;
+  let footprint: LonLatRing | null = null;
+  let clickPlace: ((lat: number, lon: number) => void) | null = null;
 
-  const boundsOf = (layer: L.Rectangle): Bounds => {
+  const boundsOfLayer = (layer: L.Polygon | L.Rectangle): Bounds => {
     const b = layer.getBounds();
     return { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
   };
 
-  const notify = () => onSelectionChange(selection ? boundsOf(selection) : null);
+  const notify = () => onSelectionChange(selectionLayer ? boundsOfLayer(selectionLayer) : null);
+
+  const clearSelection = () => {
+    if (selectionLayer) {
+      selectionLayer.remove();
+      selectionLayer = null;
+    }
+    footprint = null;
+    notify();
+  };
+
+  const setPolygon = (ring: LonLatRing, fit = true) => {
+    clearSelection();
+    footprint = ring;
+    selectionLayer = L.polygon(
+      ring.map(([lon, lat]) => [lat, lon] as L.LatLngExpression),
+      STYLE,
+    ).addTo(map);
+    selectionLayer.on('pm:edit', () => {
+      const latlngs = (selectionLayer as L.Polygon).getLatLngs()[0] as L.LatLng[];
+      footprint = latlngs.map((ll) => [ll.lng, ll.lat] as [number, number]);
+      if (footprint.length && (footprint[0][0] !== footprint[footprint.length - 1][0] || footprint[0][1] !== footprint[footprint.length - 1][1])) {
+        footprint.push(footprint[0]);
+      }
+      notify();
+    });
+    selectionLayer.on('pm:dragend', notify);
+    if (fit) {
+      map.fitBounds(selectionLayer.getBounds(), { maxZoom: 17, padding: [40, 40] });
+    }
+    notify();
+  };
+
+  const centerOrMap = (center?: { lat: number; lon: number }) =>
+    center ?? { lat: map.getCenter().lat, lon: map.getCenter().lng };
+
+  const placeRectangle = (widthM: number, heightM: number, center?: { lat: number; lon: number }) => {
+    const c = centerOrMap(center);
+    const b = boundsFromCenter(c.lat, c.lon, widthM, heightM);
+    setPolygon(rectangleRing(b));
+  };
+
+  const placeCircle = (radiusM: number, center?: { lat: number; lon: number }) => {
+    const c = centerOrMap(center);
+    setPolygon(circleRing(c.lat, c.lon, radiusM));
+  };
+
+  const placeTriangle = (sizeM: number, center?: { lat: number; lon: number }) => {
+    const c = centerOrMap(center);
+    setPolygon(triangleRing(c.lat, c.lon, sizeM));
+  };
+
+  const placeHeart = (sizeM: number, center?: { lat: number; lon: number }) => {
+    const c = centerOrMap(center);
+    setPolygon(heartRing(c.lat, c.lon, sizeM));
+  };
 
   map.on('pm:create', (e) => {
     if (e.shape !== 'Rectangle') return;
-    if (selection) selection.remove();
-    selection = e.layer as L.Rectangle;
-    selection.on('pm:edit', notify);
-    selection.on('pm:dragend', notify);
+    clearSelection();
+    selectionLayer = e.layer as L.Rectangle;
+    const b = boundsOfLayer(selectionLayer);
+    footprint = rectangleRing(b);
+    selectionLayer.setStyle(STYLE);
+    selectionLayer.on('pm:edit', notify);
+    selectionLayer.on('pm:dragend', notify);
     notify();
   });
 
   map.on('pm:remove', (e) => {
-    if (e.layer === selection) {
-      selection = null;
+    if (e.layer === selectionLayer) {
+      selectionLayer = null;
+      footprint = null;
       notify();
     }
   });
 
+  map.on('click', (e: L.LeafletMouseEvent) => {
+    if (!clickPlace) return;
+    const handler = clickPlace;
+    clickPlace = null;
+    map.getContainer().style.cursor = '';
+    handler(e.latlng.lat, e.latlng.lng);
+  });
+
   return {
     map,
-    getSelection: () => (selection ? boundsOf(selection) : null),
+    getSelection: () => (selectionLayer ? boundsOfLayer(selectionLayer) : null),
+    getFootprint: () => footprint,
     flyTo: (b) =>
-      map.fitBounds(
-        L.latLngBounds([b.south, b.west], [b.north, b.east]),
-        { maxZoom: 16 },
-      ),
+      map.fitBounds(L.latLngBounds([b.south, b.west], [b.north, b.east]), { maxZoom: 16 }),
+    placeRectangle,
+    placeCircle,
+    placeTriangle,
+    placeHeart,
+    armClickPlace: (handler) => {
+      clickPlace = handler;
+      map.getContainer().style.cursor = handler ? 'crosshair' : '';
+    },
+    clearSelection,
   };
 }
 
