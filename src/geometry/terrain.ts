@@ -44,8 +44,15 @@ const EMBED_MM = 0.6;
  * Build the base plinth: a plain box from Z=0 to the base height, spanning
  * the same footprint as the terrain grid. Separate body = separately
  * colorable in multi-material slicers.
+ * When `cellMask` is set, only masked cells are kept (circle / heart / …).
  */
-export function buildBase(grid: TerrainGrid, space: ModelSpace): THREE.BufferGeometry {
+export function buildBase(
+  grid: TerrainGrid,
+  space: ModelSpace,
+  cellMask?: Uint8Array | null,
+): THREE.BufferGeometry {
+  if (cellMask) return buildMaskedSlab(grid, space, cellMask, 0, space.baseMm, /*terrain*/ false);
+
   const x0 = space.x(grid.lons[0]);
   const x1 = space.x(grid.lons[grid.cols - 1]);
   const y0 = space.y(grid.lats[0]);
@@ -80,9 +87,16 @@ export function buildBase(grid: TerrainGrid, space: ModelSpace): THREE.BufferGeo
  * down to just below the base top (embedding into the base body), and a
  * bottom face triangulated against the same perimeter vertices
  * (no T-junctions).
+ * When `cellMask` is set, only masked cells are kept (circle / heart / …).
  */
-export function buildTerrain(grid: TerrainGrid, space: ModelSpace): THREE.BufferGeometry {
+export function buildTerrain(
+  grid: TerrainGrid,
+  space: ModelSpace,
+  cellMask?: Uint8Array | null,
+): THREE.BufferGeometry {
   const bottomZ = Math.max(0, space.baseMm - EMBED_MM);
+  if (cellMask) return buildMaskedSlab(grid, space, cellMask, bottomZ, null, /*terrain*/ true);
+
   const { elev, cols, rows, lons, lats } = grid;
   const positions: number[] = [];
 
@@ -136,6 +150,102 @@ export function buildTerrain(grid: TerrainGrid, space: ModelSpace): THREE.Buffer
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * Watertight slab clipped to a cell mask. For terrain, top Z follows relief;
+ * for base, top Z is flat at `flatTopZ`.
+ */
+function buildMaskedSlab(
+  grid: TerrainGrid,
+  space: ModelSpace,
+  cellMask: Uint8Array,
+  bottomZ: number,
+  flatTopZ: number | null,
+  terrain: boolean,
+): THREE.BufferGeometry {
+  const { elev, cols, rows, lons, lats } = grid;
+  const cellsX = cols - 1;
+  const cellsY = rows - 1;
+  const positions: number[] = [];
+
+  const X = new Float32Array(cols);
+  for (let i = 0; i < cols; i++) X[i] = space.x(lons[i]);
+  const Y = new Float32Array(rows);
+  for (let j = 0; j < rows; j++) Y[j] = space.y(lats[j]);
+  const topZAt = (i: number, j: number) =>
+    flatTopZ !== null ? flatTopZ : space.z(elev[j * cols + i]);
+
+  const at = (i: number, j: number) =>
+    i >= 0 && j >= 0 && i < cellsX && j < cellsY ? cellMask[j * cellsX + i] === 1 : false;
+
+  const tri = (
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+    cx: number, cy: number, cz: number,
+  ) => {
+    positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+  };
+
+  const quadTop = (i: number, j: number) => {
+    const x0 = X[i], x1 = X[i + 1];
+    const y0 = Y[j], y1 = Y[j + 1];
+    const z00 = topZAt(i, j), z10 = topZAt(i + 1, j), z01 = topZAt(i, j + 1), z11 = topZAt(i + 1, j + 1);
+    tri(x0, y0, z00, x1, y0, z10, x1, y1, z11);
+    tri(x0, y0, z00, x1, y1, z11, x0, y1, z01);
+  };
+
+  const quadBottom = (i: number, j: number) => {
+    const x0 = X[i], x1 = X[i + 1];
+    const y0 = Y[j], y1 = Y[j + 1];
+    tri(x0, y0, bottomZ, x1, y1, bottomZ, x1, y0, bottomZ);
+    tri(x0, y0, bottomZ, x0, y1, bottomZ, x1, y1, bottomZ);
+  };
+
+  // Wall along one cell edge; (ax,ay,az)-(bx,by,bz) runs CCW around the cell when viewed from above.
+  const wall = (
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+  ) => {
+    tri(ax, ay, bottomZ, bx, by, bottomZ, bx, by, bz);
+    tri(ax, ay, bottomZ, bx, by, bz, ax, ay, az);
+  };
+
+  for (let j = 0; j < cellsY; j++) {
+    for (let i = 0; i < cellsX; i++) {
+      if (!at(i, j)) continue;
+      quadTop(i, j);
+      quadBottom(i, j);
+
+      // South edge (j-1 neighbor)
+      if (!at(i, j - 1)) {
+        wall(X[i], Y[j], topZAt(i, j), X[i + 1], Y[j], topZAt(i + 1, j));
+      }
+      // East edge
+      if (!at(i + 1, j)) {
+        wall(X[i + 1], Y[j], topZAt(i + 1, j), X[i + 1], Y[j + 1], topZAt(i + 1, j + 1));
+      }
+      // North edge
+      if (!at(i, j + 1)) {
+        wall(X[i + 1], Y[j + 1], topZAt(i + 1, j + 1), X[i], Y[j + 1], topZAt(i, j + 1));
+      }
+      // West edge
+      if (!at(i - 1, j)) {
+        wall(X[i], Y[j + 1], topZAt(i, j + 1), X[i], Y[j], topZAt(i, j));
+      }
+    }
+  }
+
+  if (positions.length === 0) {
+    // Fallback empty box so callers always get a geometry.
+    return buildBase(grid, space, null);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  void terrain;
   return geometry;
 }
 

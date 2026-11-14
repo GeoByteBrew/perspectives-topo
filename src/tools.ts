@@ -133,7 +133,7 @@ export function setupTools(
     const scale = num('opt-scale') || 200;
     const sideMm = num('opt-print-side') || 200;
     const groundM = (sideMm / 1000) * scale;
-    if (groundM < 50) {
+    if (groundM < 40) {
       opts.onHint('Zone trop petite — augmentez le côté ou l’échelle');
       return;
     }

@@ -6,6 +6,11 @@ import { fetchMapFeatures, MapFeatures } from './overpass';
 import { sampleGrid, buildTerrain, buildBase } from './geometry/terrain';
 import { buildBuildings } from './geometry/buildings';
 import {
+  cellMaskFromFootprint,
+  outsideFootprintSubmask,
+  pointInRing,
+} from './geometry/footprint';
+import {
   buildPolygonOverlay,
   buildRoadOverlay,
   mergeSoups,
@@ -17,7 +22,9 @@ import { Preview, type ModelMeta } from './preview';
 import { downloadStl } from './export/stl';
 import { downloadThreeMf, NamedBody } from './export/threeMf';
 import { createMap, setupSearch } from './map';
+import type { RoadLine } from './overpass';
 import { resolvePrintWidthMm, setupTools } from './tools';
+import type { LonLatRing } from './shapes';
 
 const COLORS = {
   base: 0x3d3a36,
@@ -90,7 +97,7 @@ async function generate(): Promise<void> {
 
     const wM = widthMeters(bounds);
     const hM = heightMeters(bounds);
-    if (wM < 50 || hM < 50) throw new Error('Sélection trop petite — choisissez une plus grande zone.');
+    if (wM < 40 || hM < 40) throw new Error('Sélection trop petite — choisissez une plus grande zone.');
     if (wM > 60000 || hM > 60000) throw new Error('Sélection trop grande — restez sous ~60 km.');
     if (wantDetails && (wM > 6000 || hM > 6000)) {
       throw new Error('Les détails de carte demandent une sélection sous ~6 km — réduisez-la ou décochez les calques.');
@@ -114,46 +121,95 @@ async function generate(): Promise<void> {
     const depthMm = (hM / wM) * widthMm;
     const grid = sampleGrid(bounds, dem, widthMm, depthMm);
     const space = new ModelSpace(bounds, widthMm, zFactor, baseMm, grid.minElevation);
+
+    // Clip the printable solid to the drawn shape (heart, circle, triangle…).
+    const footprint = mapController.getFootprint();
+    const rawMask = footprint && footprint.length >= 3 ? cellMaskFromFootprint(grid, footprint) : null;
+    const cellMask = rawMask && rawMask.some((v) => v === 0) ? rawMask : null;
+    const outsideShape =
+      footprint && footprint.length >= 3 && cellMask
+        ? outsideFootprintSubmask(grid, footprint, 4)
+        : null;
+
     const bodies: NamedBody[] = [
-      { name: 'Base', geometry: buildBase(grid, space), color: COLORS.base },
-      { name: 'Terrain', geometry: buildTerrain(grid, space), color: COLORS.terrain },
+      { name: 'Base', geometry: buildBase(grid, space, cellMask), color: COLORS.base },
+      { name: 'Terrain', geometry: buildTerrain(grid, space, cellMask), color: COLORS.terrain },
     ];
 
     if (features) {
       const add = (name: string, geometry: THREE.BufferGeometry | null, color: number) => {
         if (geometry) bodies.push({ name, geometry, color });
       };
+      const mergeExclude = (a?: Uint8Array | null, b?: Uint8Array | null) => {
+        if (!a) return b ?? undefined;
+        if (!b) return a;
+        const out = new Uint8Array(a.length);
+        for (let i = 0; i < a.length; i++) out[i] = a[i] | b[i];
+        return out;
+      };
+
       // Water is computed first so greenery can be excluded from its cells
       // (reserves/forests in OSM often contain their lakes), but body order
       // stays stable so filament slot mapping doesn't shift.
       let water = null;
       if (layers.water) {
         setStatus(`Projection de ${features.water.length} plans d’eau…`);
-        water = buildPolygonOverlay(features.water, bounds, space, dem, grid, WATER_STYLE);
+        water = buildPolygonOverlay(
+          features.water,
+          bounds,
+          space,
+          dem,
+          grid,
+          WATER_STYLE,
+          outsideShape ?? undefined,
+        );
       }
       if (layers.green) {
         setStatus(`Projection de ${features.green.length} zones vertes…`);
         add(
           'Greenery',
-          buildPolygonOverlay(features.green, bounds, space, dem, grid, GREEN_STYLE, water?.mask).geometry,
+          buildPolygonOverlay(
+            features.green,
+            bounds,
+            space,
+            dem,
+            grid,
+            GREEN_STYLE,
+            mergeExclude(water?.mask, outsideShape),
+          ).geometry,
           COLORS.green,
         );
       }
       if (water) add('Water', water.geometry, COLORS.water);
       if (layers.roads) {
         setStatus(`Traitement de ${features.roads.length} routes…`);
+        const roadsInside = footprint
+          ? features.roads.filter((r) => roadInsideFootprint(r, footprint))
+          : features.roads;
         add(
           'Roads',
           mergeSoups(
-            buildRoadOverlay(features.roads, bounds, space, dem, ROAD_STYLE),
-            buildPolygonOverlay(features.aprons, bounds, space, dem, grid, ROAD_STYLE).geometry,
+            buildRoadOverlay(roadsInside, bounds, space, dem, ROAD_STYLE),
+            buildPolygonOverlay(
+              features.aprons,
+              bounds,
+              space,
+              dem,
+              grid,
+              ROAD_STYLE,
+              outsideShape ?? undefined,
+            ).geometry,
           ),
           COLORS.roads,
         );
       }
       if (layers.buildings) {
         setStatus(`Extrusion de ${features.buildings.length} bâtiments…`);
-        add('Buildings', buildBuildings(features.buildings, bounds, space, dem), COLORS.buildings);
+        add(
+          'Buildings',
+          buildBuildings(features.buildings, bounds, space, dem, footprint),
+          COLORS.buildings,
+        );
       }
     }
 
@@ -185,6 +241,12 @@ async function generate(): Promise<void> {
     generating = false;
     btnGenerate.disabled = selection === null;
   }
+}
+
+function roadInsideFootprint(road: RoadLine, footprint: LonLatRing): boolean {
+  if (road.points.length === 0) return false;
+  const mid = road.points[Math.floor(road.points.length / 2)];
+  return pointInRing(mid[0], mid[1], footprint);
 }
 
 function modelHeightMm(bodies: NamedBody[]): number {

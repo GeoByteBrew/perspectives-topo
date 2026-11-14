@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import type { Feature, MultiPolygon, Polygon, Position } from 'geojson';
 import { Bounds, ModelSpace } from '../geo';
 import type { Dem } from '../elevation';
+import type { LonLatRing } from '../shapes';
 import { clipRing } from './clip';
+import { pointInRing } from './footprint';
 
 const DEFAULT_HEIGHT_M = 8;
 const METERS_PER_LEVEL = 3;
@@ -18,6 +20,7 @@ export function buildBuildings(
   bounds: Bounds,
   space: ModelSpace,
   dem: Dem,
+  footprint?: LonLatRing | null,
 ): THREE.BufferGeometry | null {
   const positions: number[] = [];
 
@@ -32,6 +35,19 @@ export function buildBuildings(
     for (const rings of polygons) {
       const outer = clipRing(rings[0] ?? [], bounds);
       if (outer.length < 3) continue;
+
+      // Keep buildings whose centroid lies inside the chosen shape (heart, circle…).
+      if (footprint && footprint.length >= 3) {
+        let cx = 0;
+        let cy = 0;
+        for (const [lon, lat] of outer) {
+          cx += lon;
+          cy += lat;
+        }
+        cx /= outer.length;
+        cy /= outer.length;
+        if (!pointInRing(cx, cy, footprint)) continue;
+      }
 
       const points = outer.map(([lon, lat]) => new THREE.Vector2(space.x(lon), space.y(lat)));
       if (Math.abs(polygonAreaMm2(points)) < MIN_FOOTPRINT_MM2) continue;
