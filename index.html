@@ -13,7 +13,7 @@
     <div id="app">
       <header id="topbar">
         <h1>Perspectives Topo</h1>
-        <span class="tagline">choisissez un lieu &rarr; imprimez-le</span>
+        <span class="tagline">zone → impression → découpe → export</span>
         <div id="search">
           <input
             id="search-input"
@@ -39,84 +39,108 @@
         </a>
       </header>
       <main id="panes">
-        <aside id="tool-panel" aria-label="Outils de sélection">
-          <section class="tool-section">
-            <h2>Zone</h2>
-            <p class="tool-hint">Place au centre de la carte, ou activez « Cliquer pour placer ».</p>
-            <div class="preset-row" role="group" aria-label="Carrés prédéfinis">
-              <button type="button" class="preset" data-place="square" data-m="100">100×100 m</button>
-              <button type="button" class="preset" data-place="square" data-m="250">250×250 m</button>
-              <button type="button" class="preset" data-place="square" data-m="500">500×500 m</button>
-            </div>
-            <div class="field-row">
-              <label>L <input id="sel-width-m" type="number" min="50" max="6000" step="10" value="250" /> m</label>
-              <label>× P <input id="sel-height-m" type="number" min="50" max="6000" step="10" value="500" /> m</label>
-              <button type="button" id="btn-place-rect" class="tool-btn">Rectangle</button>
-            </div>
-            <div class="field-row">
-              <label>Rayon <input id="sel-radius-m" type="number" min="25" max="3000" step="5" value="150" /> m</label>
-              <button type="button" id="btn-place-circle" class="tool-btn">Cercle</button>
-            </div>
-            <div class="field-row">
-              <label>Taille <input id="sel-shape-m" type="number" min="50" max="6000" step="10" value="300" /> m</label>
-              <button type="button" id="btn-place-triangle" class="tool-btn">Triangle</button>
-              <button type="button" id="btn-place-heart" class="tool-btn">Cœur</button>
-            </div>
-            <div class="field-row">
-              <button type="button" id="btn-click-place" class="tool-btn tool-btn-toggle">Cliquer pour placer</button>
-              <button type="button" id="btn-clear-sel" class="tool-btn tool-btn-ghost">Effacer</button>
-            </div>
-            <p class="tool-note">
-              La forme choisie (rectangle, cercle, triangle, cœur) découpe aussi le modèle 3D imprimé.
-            </p>
-          </section>
-
-          <section class="tool-section">
-            <h2>Impression</h2>
-            <div class="radio-row" role="radiogroup" aria-label="Mode d’impression">
-              <label class="radio">
-                <input type="radio" name="print-mode" id="print-mode-size" value="size" checked />
-                Largeur fixe
-              </label>
-              <label class="radio">
-                <input type="radio" name="print-mode" id="print-mode-scale" value="scale" />
-                Échelle 1:N
-              </label>
-            </div>
-            <div class="field-row" id="print-size-fields">
-              <label title="Largeur est-ouest du modèle imprimé.">
-                Largeur
-                <input id="opt-width" type="number" min="20" max="400" step="5" value="120" /> mm
-              </label>
-            </div>
-            <div class="field-row" id="print-scale-fields" hidden>
-              <label title="Échelle cartographique, ex. 200 pour 1:200.">
-                1:
-                <input id="opt-scale" type="number" min="50" max="50000" step="10" value="200" />
-              </label>
-              <label title="Côté du carré d’impression. Avec l’échelle, place aussi la zone au sol correspondante.">
-                Côté
-                <input id="opt-print-side" type="number" min="20" max="400" step="5" value="200" /> mm
-              </label>
-              <button type="button" id="btn-apply-scale" class="tool-btn" title="Place un carré au sol pour cette échelle et ce côté">
-                Appliquer
-              </button>
-            </div>
-            <p class="tool-hint" id="print-scale-hint" hidden></p>
-          </section>
+        <aside id="tool-panel" aria-label="Étape 1 — Zone">
+          <p class="step-badge">1 · Zone</p>
+          <h2>Choisir un carré</h2>
+          <p class="tool-hint">Placez un carré sur la carte (centre ou clic), puis générez.</p>
+          <div class="preset-row" role="group" aria-label="Carrés prédéfinis">
+            <button type="button" class="preset" data-place="square" data-m="100">100×100 m</button>
+            <button type="button" class="preset" data-place="square" data-m="250">250×250 m</button>
+            <button type="button" class="preset" data-place="square" data-m="500">500×500 m</button>
+          </div>
+          <div class="field-row">
+            <label>
+              Côté
+              <input id="sel-side-m" type="number" min="40" max="6000" step="10" value="300" />
+              m
+            </label>
+            <button type="button" id="btn-place-square" class="tool-btn">Placer</button>
+          </div>
+          <div class="field-row">
+            <button type="button" id="btn-click-place" class="tool-btn tool-btn-toggle">
+              Cliquer pour placer
+            </button>
+            <button type="button" id="btn-clear-sel" class="tool-btn tool-btn-ghost">Effacer</button>
+          </div>
+          <button type="button" id="btn-generate" class="tool-btn tool-btn-primary" disabled>
+            Générer le modèle
+          </button>
+          <p class="tool-note" id="zone-summary">Aucun carré sélectionné.</p>
         </aside>
 
         <section id="map-pane">
           <div id="map"></div>
-          <div id="map-hint">Choisissez une zone à gauche, ou dessinez un rectangle</div>
+          <div id="map-hint">Étape 1 — placez un carré sur la carte</div>
         </section>
+
         <section id="preview-pane">
-          <canvas id="preview"></canvas>
-          <div id="preview-empty">Le modèle généré apparaîtra ici</div>
-          <aside id="preview-meta" hidden aria-live="polite">
-            <p class="preview-meta-scale" id="preview-meta-scale"></p>
-            <p class="preview-meta-dims" id="preview-meta-dims"></p>
-            <p class="preview-meta-ground" id="preview-meta-ground"></p>
+          <div id="preview-stage">
+            <canvas id="preview"></canvas>
+            <div id="preview-empty">Le modèle apparaîtra ici après la génération</div>
+            <aside id="preview-meta" hidden aria-live="polite">
+              <p class="preview-meta-scale" id="preview-meta-scale"></p>
+              <p class="preview-meta-dims" id="preview-meta-dims"></p>
+              <p class="preview-meta-ground" id="preview-meta-ground"></p>
+            </aside>
+          </div>
+
+          <aside id="studio-panel" hidden aria-label="Impression et découpe">
+            <section class="studio-step">
+              <p class="step-badge">2 · Impression</p>
+              <h2>Taille d’impression</h2>
+              <div class="radio-col" role="radiogroup" aria-label="Mode d’impression">
+                <label class="radio">
+                  <input type="radio" name="print-mode" id="print-mode-fit" value="fit" checked />
+                  <span>
+                    <strong>Ajuster la zone</strong>
+                    <small>Toute la zone choisie entre dans L × P mm</small>
+                  </span>
+                </label>
+                <label class="radio">
+                  <input type="radio" name="print-mode" id="print-mode-scale" value="scale" />
+                  <span>
+                    <strong>Échelle dans le plateau</strong>
+                    <small>Modèle à 1:N placé dans L × P mm max</small>
+                  </span>
+                </label>
+              </div>
+              <div class="field-row">
+                <label>L <input id="print-w-mm" type="number" min="20" max="400" step="5" value="200" /> mm</label>
+                <label>× P <input id="print-d-mm" type="number" min="20" max="400" step="5" value="200" /> mm</label>
+              </div>
+              <div class="field-row" id="print-scale-row" hidden>
+                <label>1: <input id="opt-scale" type="number" min="50" max="50000" step="10" value="500" /></label>
+              </div>
+              <p class="tool-hint" id="print-hint"></p>
+            </section>
+
+            <section class="studio-step">
+              <p class="step-badge">3 · Découpe</p>
+              <h2>Forme de découpe</h2>
+              <p class="tool-hint">Optionnel — découpe le modèle dans le carré.</p>
+              <div class="cut-row" role="group" aria-label="Forme de découpe">
+                <button type="button" class="cut-btn active" data-cut="none">Carré</button>
+                <button type="button" class="cut-btn" data-cut="circle">Cercle</button>
+                <button type="button" class="cut-btn" data-cut="heart">Cœur</button>
+                <button type="button" class="cut-btn" data-cut="rect">Rectangle</button>
+              </div>
+              <div class="field-row" id="cut-rect-row" hidden>
+                <label>L % <input id="cut-rect-w" type="number" min="20" max="100" step="5" value="100" /></label>
+                <label>P % <input id="cut-rect-d" type="number" min="20" max="100" step="5" value="70" /></label>
+              </div>
+            </section>
+
+            <section class="studio-step">
+              <p class="step-badge">4 · Export</p>
+              <button type="button" id="btn-rebuild" class="tool-btn tool-btn-primary">
+                Réorganiser le modèle
+              </button>
+              <div class="field-row export-row">
+                <button type="button" id="btn-download-3mf" class="tool-btn" disabled>3MF</button>
+                <button type="button" id="btn-download" class="tool-btn" disabled>STL</button>
+              </div>
+              <p class="tool-hint" id="export-hint">Réorganisez pour appliquer impression + découpe, puis téléchargez.</p>
+            </section>
           </aside>
         </section>
       </main>
@@ -141,9 +165,6 @@
         <label class="checkbox">
           <input id="opt-green" type="checkbox" checked /> Végétation
         </label>
-        <button id="btn-generate" disabled>Générer</button>
-        <button id="btn-download-3mf" disabled>Télécharger 3MF</button>
-        <button id="btn-download" disabled>Télécharger STL</button>
         <span id="status"></span>
         <span id="attribution">
           Basé sur
