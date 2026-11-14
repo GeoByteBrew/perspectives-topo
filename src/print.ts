@@ -11,16 +11,22 @@ export type PrintMode = 'fit' | 'scale';
 export type CutShape = 'none' | 'circle' | 'heart' | 'rect';
 
 export interface PrintSize {
-  /** East–west size of the printed model in mm. */
+  /** East–west size used to build the model (mm). */
   widthMm: number;
-  /** North–south size of the printed model in mm. */
+  /** North–south size used to build the model (mm). */
   depthMm: number;
+  /** Full model size at the chosen scale before bed crop. */
+  naturalWidthMm: number;
+  naturalDepthMm: number;
   /** Resulting map scale (real/model), e.g. 500 for 1:500. */
   scaleRatio: number;
-  /** Bed requested by the user (may be larger than the model in scale mode). */
   bedWidthMm: number;
   bedDepthMm: number;
   mode: PrintMode;
+  /** True when at this scale the full zone is larger than the bed. */
+  overflow: boolean;
+  /** Center crop of the zone that fits in the bed at this scale. */
+  cropBounds: Bounds | null;
   note: string;
 }
 
@@ -36,7 +42,29 @@ export function readCutShape(): CutShape {
   return 'none';
 }
 
-/** Compute print size from the selected ground bounds and the UI. */
+/** Ground window (m) that fits in the bed at scale 1:N. */
+export function bedGroundMeters(bedWmm: number, bedDmm: number, scaleRatio: number): {
+  widthM: number;
+  depthM: number;
+} {
+  return {
+    widthM: (bedWmm / 1000) * scaleRatio,
+    depthM: (bedDmm / 1000) * scaleRatio,
+  };
+}
+
+export function centerCropBounds(bounds: Bounds, cropWidthM: number, cropDepthM: number): Bounds {
+  const c = centerOf(bounds);
+  const w = Math.min(widthMeters(bounds), cropWidthM);
+  const h = Math.min(heightMeters(bounds), cropDepthM);
+  return boundsFromCenter(c.lat, c.lon, w, h);
+}
+
+/**
+ * Compute print size from the selected ground bounds and the UI.
+ * In scale mode, overflow no longer errors: the center that fits in the bed
+ * is kept, the surplus is preview-dimmed and cut on « Réorganiser ».
+ */
 export function resolvePrintSize(bounds: Bounds): PrintSize {
   const bedW = clamp(num('print-w-mm', 200), 20, 400);
   const bedD = clamp(num('print-d-mm', 200), 20, 400);
@@ -45,7 +73,6 @@ export function resolvePrintSize(bounds: Bounds): PrintSize {
   const mode = readPrintMode();
 
   if (mode === 'fit') {
-    // Uniform scale so the whole area fits inside the bed.
     const scaleW = (wM * 1000) / bedW;
     const scaleD = (hM * 1000) / bedD;
     const scaleRatio = Math.max(scaleW, scaleD);
@@ -54,31 +81,57 @@ export function resolvePrintSize(bounds: Bounds): PrintSize {
     return {
       widthMm,
       depthMm,
+      naturalWidthMm: widthMm,
+      naturalDepthMm: depthMm,
       scaleRatio,
       bedWidthMm: bedW,
       bedDepthMm: bedD,
       mode,
+      overflow: false,
+      cropBounds: null,
       note: `Zone entière → ${fmt1(widthMm)} × ${fmt1(depthMm)} mm (1:${fmtScale(scaleRatio)})`,
     };
   }
 
   const scaleRatio = Math.max(50, num('opt-scale', 500));
-  const widthMm = (wM * 1000) / scaleRatio;
-  const depthMm = (hM * 1000) / scaleRatio;
-  if (widthMm > bedW + 0.05 || depthMm > bedD + 0.05) {
-    throw new Error(
-      `À 1:${fmtScale(scaleRatio)} le modèle ferait ${fmt1(widthMm)} × ${fmt1(depthMm)} mm — ` +
-        `plus grand que le plateau ${bedW} × ${bedD} mm. Augmentez l’échelle (N) ou le plateau.`,
-    );
+  const naturalWidthMm = (wM * 1000) / scaleRatio;
+  const naturalDepthMm = (hM * 1000) / scaleRatio;
+  const overflow = naturalWidthMm > bedW + 0.05 || naturalDepthMm > bedD + 0.05;
+
+  if (!overflow) {
+    return {
+      widthMm: naturalWidthMm,
+      depthMm: naturalDepthMm,
+      naturalWidthMm,
+      naturalDepthMm,
+      scaleRatio,
+      bedWidthMm: bedW,
+      bedDepthMm: bedD,
+      mode,
+      overflow: false,
+      cropBounds: null,
+      note: `1:${fmtScale(scaleRatio)} → ${fmt1(naturalWidthMm)} × ${fmt1(naturalDepthMm)} mm dans ${bedW} × ${bedD} mm`,
+    };
   }
+
+  const { widthM, depthM } = bedGroundMeters(bedW, bedD, scaleRatio);
+  const cropBounds = centerCropBounds(bounds, widthM, depthM);
   return {
-    widthMm,
-    depthMm,
+    // Preview builds the full zone at true scale; rebuild uses bed size + crop.
+    widthMm: naturalWidthMm,
+    depthMm: naturalDepthMm,
+    naturalWidthMm,
+    naturalDepthMm,
     scaleRatio,
     bedWidthMm: bedW,
     bedDepthMm: bedD,
     mode,
-    note: `1:${fmtScale(scaleRatio)} → ${fmt1(widthMm)} × ${fmt1(depthMm)} mm dans ${bedW} × ${bedD} mm`,
+    overflow: true,
+    cropBounds,
+    note:
+      `1:${fmtScale(scaleRatio)} : zone ${fmt1(naturalWidthMm)} × ${fmt1(naturalDepthMm)} mm → ` +
+      `plateau ${bedW} × ${bedD} mm (centre ~${Math.round(widthM)} × ${Math.round(depthM)} m). ` +
+      `Hors plateau assombri — « Réorganiser » coupe le surplus.`,
   };
 }
 

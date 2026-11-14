@@ -133,37 +133,48 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
     }
 
     const print = resolvePrintSize(bounds);
-    const widthMm = print.widthMm;
-    if (widthMm < 20 || widthMm > 400 || print.depthMm < 20 || print.depthMm > 400) {
-      throw new Error('Taille d’impression hors limites (20–400 mm).');
+    // Overflow preview: build the full zone at true scale (may exceed 400 mm).
+    // Rebuild: keep only the centered bed window and cut the surplus.
+    const applyCrop = mode === 'rebuild' && print.overflow && print.cropBounds !== null;
+    const buildBounds = applyCrop ? print.cropBounds! : bounds;
+    const widthMm = applyCrop ? print.bedWidthMm : print.widthMm;
+    const depthMm = applyCrop ? print.bedDepthMm : print.depthMm;
+    const maxMm = applyCrop || !print.overflow ? 400 : 2000;
+    if (widthMm < 20 || depthMm < 20 || widthMm > maxMm || depthMm > maxMm) {
+      throw new Error('Taille d’impression hors limites.');
     }
 
-    const key = boundsKey(bounds);
+    const fetchBounds = bounds; // always cache DEM for the full selected square
+    const key = boundsKey(fetchBounds);
     let dem = cachedDem;
     let features = cachedFeatures;
     if (cacheKey !== key || !dem) {
       setStatus('Récupération du relief…');
-      dem = await loadDem(bounds);
+      dem = await loadDem(fetchBounds);
       features = null;
       if (wantDetails) {
         setStatus('Récupération des données OpenStreetMap…');
-        features = await fetchMapFeatures(bounds);
+        features = await fetchMapFeatures(fetchBounds);
       }
       cacheKey = key;
       cachedDem = dem;
       cachedFeatures = features;
     } else if (wantDetails && !features) {
       setStatus('Récupération des données OpenStreetMap…');
-      features = await fetchMapFeatures(bounds);
+      features = await fetchMapFeatures(fetchBounds);
       cachedFeatures = features;
     }
 
     setStatus(mode === 'rebuild' ? 'Réorganisation du modèle…' : 'Construction du terrain…');
-    const depthMm = print.depthMm;
-    const grid = sampleGrid(bounds, dem, widthMm, depthMm);
-    const space = new ModelSpace(bounds, widthMm, zFactor, baseMm, grid.minElevation);
+    const buildWM = widthMeters(buildBounds);
+    const buildHM = heightMeters(buildBounds);
+    const grid = sampleGrid(buildBounds, dem, widthMm, depthMm);
+    const space = new ModelSpace(buildBounds, widthMm, zFactor, baseMm, grid.minElevation);
 
-    const cutRing = cutFootprint(bounds, readCutShape());
+    // During overflow preview, keep the full square so the bed window is obvious.
+    // Cut shapes apply after « Réorganiser » (cropped print) or when there is no overflow.
+    const cutShape = applyCrop || !print.overflow ? readCutShape() : 'none';
+    const cutRing = cutFootprint(buildBounds, cutShape);
     const rawMask = cutRing.length >= 3 ? cellMaskFromFootprint(grid, cutRing) : null;
     const cellMask = rawMask && rawMask.some((v) => v === 0) ? rawMask : null;
     const outsideShape =
@@ -191,7 +202,7 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
         setStatus(`Projection de ${features.water.length} plans d’eau…`);
         water = buildPolygonOverlay(
           features.water,
-          bounds,
+          buildBounds,
           space,
           dem,
           grid,
@@ -205,7 +216,7 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
           'Greenery',
           buildPolygonOverlay(
             features.green,
-            bounds,
+            buildBounds,
             space,
             dem,
             grid,
@@ -224,10 +235,10 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
         add(
           'Roads',
           mergeSoups(
-            buildRoadOverlay(roadsInside, bounds, space, dem, ROAD_STYLE),
+            buildRoadOverlay(roadsInside, buildBounds, space, dem, ROAD_STYLE),
             buildPolygonOverlay(
               features.aprons,
-              bounds,
+              buildBounds,
               space,
               dem,
               grid,
@@ -242,40 +253,56 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
         setStatus(`Extrusion de ${features.buildings.length} bâtiments…`);
         add(
           'Buildings',
-          buildBuildings(features.buildings, bounds, space, dem, cellMask ? cutRing : null),
+          buildBuildings(features.buildings, buildBounds, space, dem, cellMask ? cutRing : null),
           COLORS.buildings,
         );
       }
     }
 
     const heightMm = modelHeightMm(bodies);
+    const showOverflowPreview = print.overflow && !applyCrop;
     const meta: ModelMeta = {
       widthMm: space.widthMm,
       depthMm: space.depthMm,
       heightMm,
       scaleRatio: print.scaleRatio,
-      groundWidthM: wM,
-      groundDepthM: hM,
+      groundWidthM: buildWM,
+      groundDepthM: buildHM,
+      bedCrop: showOverflowPreview
+        ? { widthMm: print.bedWidthMm, depthMm: print.bedDepthMm }
+        : null,
     };
     preview.show(bodies, meta);
-    showPreviewMeta(meta);
+    showPreviewMeta(meta, showOverflowPreview ? print : null);
     previewEmpty.hidden = true;
     studioPanel.hidden = false;
     hasModel = true;
     exportBodies = bodies;
-    btnDownload.disabled = false;
-    btnDownload3mf.disabled = false;
-    exportHint.textContent = 'Prêt — téléchargez le 3MF ou le STL.';
+
+    if (showOverflowPreview) {
+      btnDownload.disabled = true;
+      btnDownload3mf.disabled = true;
+      exportHint.textContent =
+        'Hors plateau assombri — cliquez « Réorganiser le modèle » pour couper au centre, puis téléchargez.';
+    } else {
+      btnDownload.disabled = false;
+      btnDownload3mf.disabled = false;
+      exportHint.textContent = 'Prêt — téléchargez le 3MF ou le STL.';
+    }
     updatePrintHint(bounds);
 
     const tris = bodies.reduce((n, b) => n + b.geometry.getAttribute('position').count / 3, 0);
     setStatus(
-      `Terminé — ${fmtMm(space.widthMm)} × ${fmtMm(space.depthMm)} × ${fmtMm(heightMm)} mm · ` +
-        `1:${fmtScaleNum(print.scaleRatio)} · ${Math.round(tris).toLocaleString('fr-FR')} triangles`,
+      showOverflowPreview
+        ? `Aperçu 1:${fmtScaleNum(print.scaleRatio)} — surplus assombri · réorganisez pour couper à ${print.bedWidthMm} × ${print.bedDepthMm} mm`
+        : `Terminé — ${fmtMm(space.widthMm)} × ${fmtMm(space.depthMm)} × ${fmtMm(heightMm)} mm · ` +
+            `1:${fmtScaleNum(print.scaleRatio)} · ${Math.round(tris).toLocaleString('fr-FR')} triangles`,
     );
     if (mode === 'first') {
       mapHint.hidden = false;
-      mapHint.textContent = 'Étapes 2–4 à droite : impression, découpe, export';
+      mapHint.textContent = showOverflowPreview
+        ? 'Plateau trop petit pour l’échelle — le centre reste clair, le reste sera coupé'
+        : 'Étapes 2–4 à droite : impression, découpe, export';
     }
   } catch (err) {
     console.error(err);
@@ -321,13 +348,23 @@ function fmtGround(m: number): string {
   return `${km < 10 ? km.toFixed(1).replace('.', ',') : Math.round(km)} km`;
 }
 
-function showPreviewMeta(meta: ModelMeta): void {
+function showPreviewMeta(
+  meta: ModelMeta,
+  overflow: { bedWidthMm: number; bedDepthMm: number } | null,
+): void {
   previewMeta.hidden = false;
   previewMetaScale.textContent = `Échelle ${fmtScale(meta.scaleRatio)}`;
-  previewMetaDims.textContent =
-    `Modèle ${fmtMm(meta.widthMm)} × ${fmtMm(meta.depthMm)} × ${fmtMm(meta.heightMm)} mm`;
-  previewMetaGround.textContent =
-    `Terrain ${fmtGround(meta.groundWidthM)} × ${fmtGround(meta.groundDepthM)}`;
+  if (overflow) {
+    previewMetaDims.textContent =
+      `Plateau ${fmtMm(overflow.bedWidthMm)} × ${fmtMm(overflow.bedDepthMm)} mm (centre)`;
+    previewMetaGround.textContent =
+      `Zone ${fmtGround(meta.groundWidthM)} × ${fmtGround(meta.groundDepthM)} — surplus à couper`;
+  } else {
+    previewMetaDims.textContent =
+      `Modèle ${fmtMm(meta.widthMm)} × ${fmtMm(meta.depthMm)} × ${fmtMm(meta.heightMm)} mm`;
+    previewMetaGround.textContent =
+      `Terrain ${fmtGround(meta.groundWidthM)} × ${fmtGround(meta.groundDepthM)}`;
+  }
 }
 
 btnGenerate.addEventListener('click', () => void generate('first'));

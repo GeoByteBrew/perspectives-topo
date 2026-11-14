@@ -15,6 +15,8 @@ export interface ModelMeta {
   scaleRatio: number;
   groundWidthM: number;
   groundDepthM: number;
+  /** When set, dim everything outside this centered bed window. */
+  bedCrop?: { widthMm: number; depthMm: number } | null;
 }
 
 /** Three.js viewport for the generated model. Geometries are Z-up mm. */
@@ -25,6 +27,7 @@ export class Preview {
   private controls: OrbitControls;
   private group = new THREE.Group();
   private dimsGroup = new THREE.Group();
+  private cropGroup = new THREE.Group();
 
   constructor(private canvas: HTMLCanvasElement) {
     // preserveDrawingBuffer lets snapshot() read pixels for 3MF thumbnails.
@@ -39,6 +42,7 @@ export class Preview {
     this.group.rotation.x = -Math.PI / 2;
     this.scene.add(this.group);
     this.group.add(this.dimsGroup);
+    this.group.add(this.cropGroup);
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.4));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -68,7 +72,51 @@ export class Preview {
       this.group.add(new THREE.Mesh(geometry, material));
     });
     if (items.length > 0) this.fit(items[0].geometry);
-    if (meta) this.drawDimensions(meta);
+    if (meta) {
+      this.drawDimensions(meta);
+      if (meta.bedCrop) this.drawBedCrop(meta);
+    }
+  }
+
+  /** Darken the surplus outside the print bed; keep the center readable. */
+  private drawBedCrop(meta: ModelMeta): void {
+    const bed = meta.bedCrop!;
+    const modelW = meta.widthMm;
+    const modelD = meta.depthMm;
+    if (bed.widthMm >= modelW - 0.05 && bed.depthMm >= modelD - 0.05) return;
+
+    const h = Math.max(meta.heightMm, 8);
+    const hx = modelW / 2;
+    const hy = modelD / 2;
+    const bx = bed.widthMm / 2;
+    const by = bed.depthMm / 2;
+
+    const shade = new THREE.MeshBasicMaterial({
+      color: 0x050607,
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+    });
+
+    const addBox = (cx: number, cy: number, w: number, d: number) => {
+      if (w <= 0.05 || d <= 0.05) return;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, d, h + 2), shade);
+      mesh.position.set(cx, cy, h / 2);
+      this.cropGroup.add(mesh);
+    };
+
+    // Four margins around the centered bed window (model Z-up space).
+    addBox(0, (by + hy) / 2, modelW, hy - by); // north
+    addBox(0, -(by + hy) / 2, modelW, hy - by); // south
+    addBox((bx + hx) / 2, 0, hx - bx, bed.depthMm); // east (only over bed band)
+    addBox(-(bx + hx) / 2, 0, hx - bx, bed.depthMm); // west
+
+    const frame = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(bed.widthMm, bed.depthMm, 0.2)),
+      new THREE.LineBasicMaterial({ color: 0xe8a33d }),
+    );
+    frame.position.set(0, 0, h + 0.5);
+    this.cropGroup.add(frame);
   }
 
   private drawDimensions(meta: ModelMeta): void {
@@ -130,9 +178,9 @@ export class Preview {
 
   private clear(): void {
     for (const child of [...this.group.children]) {
-      if (child === this.dimsGroup) {
-        for (const dim of [...this.dimsGroup.children]) {
-          this.dimsGroup.remove(dim);
+      if (child === this.dimsGroup || child === this.cropGroup) {
+        for (const dim of [...child.children]) {
+          child.remove(dim);
           disposeObject(dim);
         }
         continue;
