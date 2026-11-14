@@ -77,22 +77,22 @@ async function generate(): Promise<void> {
 
     const wM = widthMeters(bounds);
     const hM = heightMeters(bounds);
-    if (wM < 50 || hM < 50) throw new Error('Selection is too small — draw a bigger rectangle.');
-    if (wM > 60000 || hM > 60000) throw new Error('Selection is too large — keep it under ~60 km.');
+    if (wM < 50 || hM < 50) throw new Error('Sélection trop petite — dessinez un plus grand rectangle.');
+    if (wM > 60000 || hM > 60000) throw new Error('Sélection trop grande — restez sous ~60 km.');
     if (wantDetails && (wM > 6000 || hM > 6000)) {
-      throw new Error('Map details need a selection under ~6 km — shrink it or untick the detail layers.');
+      throw new Error('Les détails de carte demandent une sélection sous ~6 km — réduisez-la ou décochez les calques.');
     }
 
-    setStatus('Fetching elevation…');
+    setStatus('Récupération du relief…');
     const dem = await loadDem(bounds);
 
     let features: MapFeatures | null = null;
     if (wantDetails) {
-      setStatus('Fetching map data from OpenStreetMap…');
+      setStatus('Récupération des données OpenStreetMap…');
       features = await fetchMapFeatures(bounds);
     }
 
-    setStatus('Building terrain…');
+    setStatus('Construction du terrain…');
     const depthMm = (hM / wM) * widthMm;
     const grid = sampleGrid(bounds, dem, widthMm, depthMm);
     const space = new ModelSpace(bounds, widthMm, zFactor, baseMm, grid.minElevation);
@@ -110,11 +110,11 @@ async function generate(): Promise<void> {
       // stays stable so filament slot mapping doesn't shift.
       let water = null;
       if (layers.water) {
-        setStatus(`Draping ${features.water.length} water bodies…`);
+        setStatus(`Projection de ${features.water.length} plans d’eau…`);
         water = buildPolygonOverlay(features.water, bounds, space, dem, grid, WATER_STYLE);
       }
       if (layers.green) {
-        setStatus(`Draping ${features.green.length} green areas…`);
+        setStatus(`Projection de ${features.green.length} zones vertes…`);
         add(
           'Greenery',
           buildPolygonOverlay(features.green, bounds, space, dem, grid, GREEN_STYLE, water?.mask).geometry,
@@ -123,7 +123,7 @@ async function generate(): Promise<void> {
       }
       if (water) add('Water', water.geometry, COLORS.water);
       if (layers.roads) {
-        setStatus(`Buffering ${features.roads.length} roads…`);
+        setStatus(`Traitement de ${features.roads.length} routes…`);
         add(
           'Roads',
           mergeSoups(
@@ -134,7 +134,7 @@ async function generate(): Promise<void> {
         );
       }
       if (layers.buildings) {
-        setStatus(`Extruding ${features.buildings.length} buildings…`);
+        setStatus(`Extrusion de ${features.buildings.length} bâtiments…`);
         add('Buildings', buildBuildings(features.buildings, bounds, space, dem), COLORS.buildings);
       }
     }
@@ -147,12 +147,12 @@ async function generate(): Promise<void> {
 
     const tris = bodies.reduce((n, b) => n + b.geometry.getAttribute('position').count / 3, 0);
     setStatus(
-      `Done — ${space.widthMm.toFixed(0)}×${space.depthMm.toFixed(0)} mm, ` +
-        `${Math.round(tris).toLocaleString()} triangles (${dem.source})`,
+      `Terminé — ${space.widthMm.toFixed(0)}×${space.depthMm.toFixed(0)} mm, ` +
+        `${Math.round(tris).toLocaleString('fr-FR')} triangles (${dem.source})`,
     );
   } catch (err) {
     console.error(err);
-    setStatus(err instanceof Error ? err.message : 'Generation failed — see console.');
+    setStatus(err instanceof Error ? err.message : 'Échec de la génération — voir la console.');
   } finally {
     generating = false;
     btnGenerate.disabled = selection === null;
@@ -162,7 +162,7 @@ async function generate(): Promise<void> {
 btnGenerate.addEventListener('click', () => void generate());
 btnDownload.addEventListener('click', () => {
   if (exportBodies.length > 0) {
-    downloadStl(exportBodies.map((b) => b.geometry), 'tinytopo.stl');
+    downloadStl(exportBodies.map((b) => b.geometry), 'perspectives-topo.stl');
   }
 });
 btnDownload3mf.addEventListener('click', () => {
@@ -172,7 +172,7 @@ btnDownload3mf.addEventListener('click', () => {
     const small = await preview.snapshot(128);
     await downloadThreeMf(
       exportBodies,
-      'tinytopo.3mf',
+      'perspectives-topo.3mf',
       large && small ? { large, small } : undefined,
     );
   })();

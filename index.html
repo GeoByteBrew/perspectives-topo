@@ -1,35 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="TinyTopo turns any place on Earth into a 3D-printable model — terrain and buildings, exported as STL, entirely in your browser."
+      content="Perspectives Topo — sélectionnez une zone sur la carte et générez une maquette 3D imprimable (relief, bâtiments, routes…), export STL / 3MF, entièrement dans le navigateur. Fork de TinyTopo pour PERSPECTIVES."
     />
-    <title>TinyTopo — printable maps</title>
+    <title>Perspectives Topo — maquettes 3D imprimables</title>
   </head>
   <body>
     <div id="app">
       <header id="topbar">
-        <h1>TinyTopo</h1>
-        <span class="tagline">pick a spot &rarr; print it</span>
+        <h1>Perspectives Topo</h1>
+        <span class="tagline">choisissez un lieu &rarr; imprimez-le</span>
         <div id="search">
           <input
             id="search-input"
             type="search"
-            placeholder="Search a place… (Enter)"
+            placeholder="Rechercher un lieu… (Entrée)"
             autocomplete="off"
           />
           <ul id="search-results" hidden></ul>
         </div>
         <a
           id="github-link"
-          href="https://github.com/justinh-rahb/TinyTopo"
+          href="https://github.com/GeoByteBrew/perspectives-topo"
           target="_blank"
           rel="noopener"
-          aria-label="TinyTopo on GitHub"
-          title="TinyTopo on GitHub"
+          aria-label="Perspectives Topo sur GitHub"
+          title="Perspectives Topo sur GitHub"
         >
           <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor" aria-hidden="true">
             <path
@@ -41,16 +41,16 @@
       <main id="panes">
         <section id="map-pane">
           <div id="map"></div>
-          <div id="map-hint">Draw a rectangle to select an area</div>
+          <div id="map-hint">Dessinez un rectangle pour choisir une zone</div>
         </section>
         <section id="preview-pane">
           <canvas id="preview"></canvas>
-          <div id="preview-empty">The generated model will appear here</div>
+          <div id="preview-empty">Le modèle généré apparaîtra ici</div>
         </section>
       </main>
       <footer id="controls">
         <label>
-          Model width
+          Largeur
           <input id="opt-width" type="number" min="20" max="400" step="5" value="120" /> mm
         </label>
         <label>
@@ -62,25 +62,30 @@
           <input id="opt-base" type="number" min="1" max="30" step="1" value="4" /> mm
         </label>
         <label class="checkbox">
-          <input id="opt-buildings" type="checkbox" checked /> Buildings
+          <input id="opt-buildings" type="checkbox" checked /> Bâtiments
         </label>
         <label class="checkbox">
-          <input id="opt-roads" type="checkbox" checked /> Roads
+          <input id="opt-roads" type="checkbox" checked /> Routes
         </label>
         <label class="checkbox">
-          <input id="opt-water" type="checkbox" checked /> Water
+          <input id="opt-water" type="checkbox" checked /> Eau
         </label>
         <label class="checkbox">
-          <input id="opt-green" type="checkbox" checked /> Green
+          <input id="opt-green" type="checkbox" checked /> Végétation
         </label>
-        <button id="btn-generate" disabled>Generate</button>
-        <button id="btn-download-3mf" disabled>Download 3MF</button>
-        <button id="btn-download" disabled>Download STL</button>
+        <button id="btn-generate" disabled>Générer</button>
+        <button id="btn-download-3mf" disabled>Télécharger 3MF</button>
+        <button id="btn-download" disabled>Télécharger STL</button>
         <span id="status"></span>
         <span id="attribution">
+          Basé sur
+          <a href="https://github.com/justinh-rahb/TinyTopo" target="_blank" rel="noopener">TinyTopo</a>
+          (AGPL) ·
           © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
-          Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Terrain Tiles</a> (Mapzen/AWS) ·
-          Search: <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>
+          Altitude :
+          <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Terrain Tiles</a>
+          (Mapzen/AWS) ·
+          Recherche : <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a>
         </span>
       </footer>
     </div>
