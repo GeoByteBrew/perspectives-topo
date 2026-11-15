@@ -3,8 +3,7 @@ import type { Feature, MultiPolygon, Polygon, Position } from 'geojson';
 import { Bounds, ModelSpace } from '../geo';
 import type { Dem } from '../elevation';
 import type { LonLatRing } from '../shapes';
-import { clipRing } from './clip';
-import { pointInRing } from './footprint';
+import { clipRing, intersectRing } from './clip';
 
 const DEFAULT_HEIGHT_M = 8;
 const METERS_PER_LEVEL = 3;
@@ -36,51 +35,51 @@ export function buildBuildings(
       const outer = clipRing(rings[0] ?? [], bounds);
       if (outer.length < 3) continue;
 
-      // Keep buildings whose centroid lies inside the chosen shape (heart, circle…).
-      if (footprint && footprint.length >= 3) {
-        let cx = 0;
-        let cy = 0;
-        for (const [lon, lat] of outer) {
-          cx += lon;
-          cy += lat;
+      // Hard-clip to circle / heart / custom cut — not just a centroid test.
+      const pieces =
+        footprint && footprint.length >= 3 ? intersectRing(outer, footprint) : [outer];
+      if (pieces.length === 0) continue;
+
+      for (const piece of pieces) {
+        const points = piece.map(([lon, lat]) => new THREE.Vector2(space.x(lon), space.y(lat)));
+        if (Math.abs(polygonAreaMm2(points)) < MIN_FOOTPRINT_MM2) continue;
+
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+        for (const [lon, lat] of piece) {
+          const z = space.z(dem.sample(lon, lat));
+          if (z < minZ) minZ = z;
+          if (z > maxZ) maxZ = z;
         }
-        cx /= outer.length;
-        cy /= outer.length;
-        if (!pointInRing(cx, cy, footprint)) continue;
-      }
+        const scaleZ = space.mmPerMeter * space.zFactor;
+        const bottom = minHeightM > 0 ? maxZ + minHeightM * scaleZ : Math.max(0, minZ - EMBED_MM);
+        const top = maxZ + heightM * scaleZ;
+        if (top - bottom < 0.05) continue;
 
-      const points = outer.map(([lon, lat]) => new THREE.Vector2(space.x(lon), space.y(lat)));
-      if (Math.abs(polygonAreaMm2(points)) < MIN_FOOTPRINT_MM2) continue;
-
-      // Seat the solid against the terrain under the (clipped) footprint.
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      for (const [lon, lat] of outer) {
-        const z = space.z(dem.sample(lon, lat));
-        if (z < minZ) minZ = z;
-        if (z > maxZ) maxZ = z;
-      }
-      const scaleZ = space.mmPerMeter * space.zFactor;
-      const bottom = minHeightM > 0 ? maxZ + minHeightM * scaleZ : Math.max(0, minZ - EMBED_MM);
-      const top = maxZ + heightM * scaleZ;
-      if (top - bottom < 0.05) continue;
-
-      const shape = new THREE.Shape(points);
-      for (const hole of rings.slice(1)) {
-        const clipped = clipRing(hole, bounds);
-        if (clipped.length >= 3) {
-          shape.holes.push(
-            new THREE.Path(clipped.map(([lon, lat]) => new THREE.Vector2(space.x(lon), space.y(lat)))),
-          );
+        const shape = new THREE.Shape(points);
+        for (const hole of rings.slice(1)) {
+          const holeClipped = clipRing(hole, bounds);
+          if (holeClipped.length < 3) continue;
+          const holePieces =
+            footprint && footprint.length >= 3
+              ? intersectRing(holeClipped, footprint)
+              : [holeClipped];
+          for (const hp of holePieces) {
+            if (hp.length >= 3) {
+              shape.holes.push(
+                new THREE.Path(hp.map(([lon, lat]) => new THREE.Vector2(space.x(lon), space.y(lat)))),
+              );
+            }
+          }
         }
-      }
 
-      const extruded = new THREE.ExtrudeGeometry(shape, {
-        depth: top - bottom,
-        bevelEnabled: false,
-      }).translate(0, 0, bottom);
-      appendPositions(positions, extruded);
-      extruded.dispose();
+        const extruded = new THREE.ExtrudeGeometry(shape, {
+          depth: top - bottom,
+          bevelEnabled: false,
+        }).translate(0, 0, bottom);
+        appendPositions(positions, extruded);
+        extruded.dispose();
+      }
     }
   }
 

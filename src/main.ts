@@ -5,11 +5,7 @@ import { loadDem, type Dem } from './elevation';
 import { fetchMapFeatures, MapFeatures } from './overpass';
 import { sampleGrid, buildTerrain, buildBase } from './geometry/terrain';
 import { buildBuildings } from './geometry/buildings';
-import {
-  cellMaskFromFootprint,
-  outsideFootprintSubmask,
-  pointInRing,
-} from './geometry/footprint';
+import { cellMaskFromFootprint, outsideFootprintSubmask } from './geometry/footprint';
 import {
   buildPolygonOverlay,
   buildRoadOverlay,
@@ -22,10 +18,8 @@ import { Preview, type ModelMeta } from './preview';
 import { downloadStl } from './export/stl';
 import { downloadThreeMf, NamedBody } from './export/threeMf';
 import { createMap, setupSearch } from './map';
-import type { RoadLine } from './overpass';
 import { cutFootprint, readCutShape, resolvePrintSize, updatePrintHint } from './print';
 import { formatZoneSummary, setupTools } from './tools';
-import type { LonLatRing } from './shapes';
 
 const COLORS = {
   base: 0x3d3a36,
@@ -177,8 +171,11 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
     const cutRing = cutFootprint(buildBounds, cutShape);
     const rawMask = cutRing.length >= 3 ? cellMaskFromFootprint(grid, cutRing) : null;
     const cellMask = rawMask && rawMask.some((v) => v === 0) ? rawMask : null;
+    // Pass the cut polygon whenever the shape is not the full square — used to
+    // hard-clip buildings/roads (centroid tests left stubs outside the curve).
+    const clipFoot = cutShape !== 'none' ? cutRing : null;
     const outsideShape =
-      cutRing.length >= 3 && cellMask ? outsideFootprintSubmask(grid, cutRing, 4) : null;
+      clipFoot && clipFoot.length >= 3 ? outsideFootprintSubmask(grid, clipFoot, 4) : null;
 
     const bodies: NamedBody[] = [
       { name: 'Base', geometry: buildBase(grid, space, cellMask), color: COLORS.base },
@@ -229,13 +226,10 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
       if (water) add('Water', water.geometry, COLORS.water);
       if (layers.roads) {
         setStatus(`Traitement de ${features.roads.length} routes…`);
-        const roadsInside = cellMask
-          ? features.roads.filter((r) => roadInsideFootprint(r, cutRing))
-          : features.roads;
         add(
           'Roads',
           mergeSoups(
-            buildRoadOverlay(roadsInside, buildBounds, space, dem, ROAD_STYLE),
+            buildRoadOverlay(features.roads, buildBounds, space, dem, ROAD_STYLE, clipFoot),
             buildPolygonOverlay(
               features.aprons,
               buildBounds,
@@ -253,7 +247,7 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
         setStatus(`Extrusion de ${features.buildings.length} bâtiments…`);
         add(
           'Buildings',
-          buildBuildings(features.buildings, buildBounds, space, dem, cellMask ? cutRing : null),
+          buildBuildings(features.buildings, buildBounds, space, dem, clipFoot),
           COLORS.buildings,
         );
       }
@@ -312,12 +306,6 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
     btnGenerate.disabled = selection === null;
     btnRebuild.disabled = false;
   }
-}
-
-function roadInsideFootprint(road: RoadLine, footprint: LonLatRing): boolean {
-  if (road.points.length === 0) return false;
-  const mid = road.points[Math.floor(road.points.length / 2)];
-  return pointInRing(mid[0], mid[1], footprint);
 }
 
 function modelHeightMm(bodies: NamedBody[]): number {

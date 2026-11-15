@@ -1,5 +1,41 @@
 import type { Position } from 'geojson';
+import polygonClipping from 'polygon-clipping';
 import { Bounds } from '../geo';
+import type { LonLatRing } from '../shapes';
+
+/** Ensure a ring is closed (first point repeated at end) for polygon-clipping. */
+function closedRing(ring: Position[]): Array<[number, number]> {
+  if (ring.length === 0) return [];
+  const open = ring.slice(
+    0,
+    ring.length > 1 && isSame(ring[0], ring[ring.length - 1]) ? -1 : undefined,
+  ) as Array<[number, number]>;
+  if (open.length < 3) return [];
+  return [...open, open[0]];
+}
+
+/**
+ * Intersect a subject ring with an arbitrary clip polygon (circle, heart…).
+ * Returns one or more open rings (no repeated closing vertex).
+ */
+export function intersectRing(subject: Position[], clip: LonLatRing): Position[][] {
+  const a = closedRing(subject);
+  const b = closedRing(clip);
+  if (a.length < 4 || b.length < 4) return [];
+  try {
+    const result = polygonClipping.intersection([[a]], [[b]]);
+    const rings: Position[][] = [];
+    for (const poly of result) {
+      const outer = poly[0];
+      if (!outer || outer.length < 4) continue;
+      // Drop closing vertex → open ring for the rest of the pipeline.
+      rings.push(outer.slice(0, -1) as Position[]);
+    }
+    return rings;
+  } catch {
+    return [];
+  }
+}
 
 /** Sutherland–Hodgman clip of a ring against the selection rectangle. */
 export function clipRing(ring: Position[], b: Bounds): Position[] {

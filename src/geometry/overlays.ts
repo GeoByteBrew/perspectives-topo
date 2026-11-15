@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import type { Feature, MultiPolygon, Polygon, Position } from 'geojson';
 import { Bounds, ModelSpace } from '../geo';
 import type { Dem } from '../elevation';
-import { clipRing } from './clip';
+import { clipRing, intersectRing } from './clip';
 import type { RoadLine } from '../overpass';
+import type { LonLatRing } from '../shapes';
 import type { TerrainGrid } from './terrain';
 
 /**
@@ -288,6 +289,7 @@ export function buildRoadOverlay(
   space: ModelSpace,
   dem: Dem,
   style: SlabStyle = ROAD_STYLE,
+  footprint?: LonLatRing | null,
 ): THREE.BufferGeometry | null {
   const positions: number[] = [];
   for (const road of roads) {
@@ -299,9 +301,13 @@ export function buildRoadOverlay(
     if (!ringMm) continue;
     // Back to lon/lat so the slab can be clipped and draped on the DEM.
     const ring = ringMm.map(([x, y]) => [space.lon(x), space.lat(y)] as Position);
-    const clipped = clipRing(ring, bounds);
-    if (clipped.length < 3) continue;
-    appendSlabCelled(positions, clipped, [], space, dem, style);
+    const inBounds = clipRing(ring, bounds);
+    if (inBounds.length < 3) continue;
+    const pieces =
+      footprint && footprint.length >= 3 ? intersectRing(inBounds, footprint) : [inBounds];
+    for (const piece of pieces) {
+      if (piece.length >= 3) appendSlabCelled(positions, piece, [], space, dem, style);
+    }
   }
   return toGeometry(positions);
 }
