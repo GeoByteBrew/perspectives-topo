@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import * as THREE from 'three';
+import { triggerBrowserDownload } from './stl';
 
 /** A printable body: one 3MF object/part, one slicer filament slot. */
 export interface NamedBody {
@@ -271,10 +272,5 @@ export async function downloadThreeMf(
   thumbnails?: Thumbnails,
 ): Promise<void> {
   const blob = await toThreeMf(bodies, thumbnails);
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+  triggerBrowserDownload(blob, filename);
 }

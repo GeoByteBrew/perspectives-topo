@@ -82,9 +82,9 @@ setupTools(mapController, {
   getBounds: () => selection,
   onPrintUiChange: () => {
     if (hasModel) {
-      exportHint.textContent = 'Réglages modifiés — cliquez « Réorganiser le modèle ».';
-      btnDownload.disabled = true;
-      btnDownload3mf.disabled = true;
+      exportHint.textContent =
+        'Réglages modifiés — « Réorganiser » pour appliquer, ou téléchargez le modèle actuel.';
+      // Keep downloads enabled: the current mesh can still be exported.
     }
   },
 });
@@ -304,14 +304,12 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
     hasModel = true;
     exportBodies = bodies;
 
+    btnDownload.disabled = false;
+    btnDownload3mf.disabled = false;
     if (showOverflowPreview) {
-      btnDownload.disabled = true;
-      btnDownload3mf.disabled = true;
       exportHint.textContent =
-        'Hors plateau assombri — cliquez « Réorganiser le modèle » pour couper au centre, puis téléchargez.';
+        'Hors plateau assombri — téléchargez l’aperçu, ou « Réorganiser » pour couper au plateau.';
     } else {
-      btnDownload.disabled = false;
-      btnDownload3mf.disabled = false;
       exportHint.textContent = 'Prêt — téléchargez le 3MF ou le STL.';
     }
     updatePrintHint(bounds);
@@ -388,14 +386,39 @@ function showPreviewMeta(
 
 btnGenerate.addEventListener('click', () => void generate('first'));
 btnRebuild.addEventListener('click', () => void generate('rebuild'));
-btnDownload.addEventListener('click', () => {
-  if (exportBodies.length > 0) {
-    downloadStl(exportBodies.map((b) => b.geometry), 'perspectives-topo.stl');
+
+async function exportStl(): Promise<void> {
+  if (exportBodies.length === 0) {
+    setStatus('Rien à télécharger — générez d’abord un modèle.');
+    return;
   }
-});
-btnDownload3mf.addEventListener('click', () => {
-  if (exportBodies.length === 0) return;
-  void (async () => {
+  try {
+    setStatus('Préparation du STL…');
+    // Yield so the status text paints before the heavy encode.
+    await new Promise((r) => window.setTimeout(r, 30));
+    downloadStl(
+      exportBodies.map((b) => b.geometry),
+      'perspectives-topo.stl',
+    );
+    setStatus('STL téléchargé.');
+  } catch (err) {
+    console.error(err);
+    setStatus(
+      err instanceof Error
+        ? `Échec STL : ${err.message}`
+        : 'Échec du téléchargement STL (modèle trop lourd ?).',
+    );
+  }
+}
+
+async function exportThreeMf(): Promise<void> {
+  if (exportBodies.length === 0) {
+    setStatus('Rien à télécharger — générez d’abord un modèle.');
+    return;
+  }
+  try {
+    setStatus('Préparation du 3MF…');
+    await new Promise((r) => window.setTimeout(r, 30));
     const large = await preview.snapshot(512);
     const small = await preview.snapshot(128);
     await downloadThreeMf(
@@ -403,8 +426,19 @@ btnDownload3mf.addEventListener('click', () => {
       'perspectives-topo.3mf',
       large && small ? { large, small } : undefined,
     );
-  })();
-});
+    setStatus('3MF téléchargé.');
+  } catch (err) {
+    console.error(err);
+    setStatus(
+      err instanceof Error
+        ? `Échec 3MF : ${err.message}`
+        : 'Échec du téléchargement 3MF (modèle trop lourd ?).',
+    );
+  }
+}
+
+btnDownload.addEventListener('click', () => void exportStl());
+btnDownload3mf.addEventListener('click', () => void exportThreeMf());
 
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__tinytopo = {

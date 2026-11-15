@@ -59,11 +59,21 @@ export function toBinaryStl(geometries: THREE.BufferGeometry[]): ArrayBuffer {
 }
 
 export function downloadStl(geometries: THREE.BufferGeometry[], filename: string): void {
-  const blob = new Blob([toBinaryStl(geometries)], { type: 'model/stl' });
+  const buffer = toBinaryStl(geometries);
+  triggerBrowserDownload(new Blob([buffer], { type: 'application/octet-stream' }), filename);
+}
+
+/** Append-to-DOM click — required for downloads to fire in Safari / Firefox. */
+export function triggerBrowserDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // Revoke after the browser has started the download.
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
