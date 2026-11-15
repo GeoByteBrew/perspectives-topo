@@ -3,6 +3,7 @@ import '@geoman-io/leaflet-geoman-free';
 import 'leaflet/dist/leaflet.css';
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import { Bounds } from './geo';
+import type { GpxTrack } from './gpx';
 import {
   LonLatRing,
   boundsFromCenter,
@@ -16,11 +17,15 @@ export interface MapController {
   map: L.Map;
   getSelection(): Bounds | null;
   getFootprint(): LonLatRing | null;
+  getGpxTracks(): GpxTrack[];
   flyTo(bounds: Bounds): void;
   placeRectangle(widthM: number, heightM: number, center?: { lat: number; lon: number }): void;
   placeCircle(radiusM: number, center?: { lat: number; lon: number }): void;
   placeTriangle(sizeM: number, center?: { lat: number; lon: number }): void;
   placeHeart(sizeM: number, center?: { lat: number; lon: number }): void;
+  /** Draw GPX polylines (does not clear the zone selection by itself). */
+  setGpxTracks(tracks: GpxTrack[]): void;
+  clearGpxTracks(): void;
   /** Next map click places the pending shape (or cancels if null). */
   armClickPlace(handler: ((lat: number, lon: number) => void) | null): void;
   clearSelection(): void;
@@ -66,6 +71,14 @@ export function createMap(
   let selectionLayer: L.Polygon | L.Rectangle | null = null;
   let footprint: LonLatRing | null = null;
   let clickPlace: ((lat: number, lon: number) => void) | null = null;
+  let gpxLayer: L.LayerGroup | null = null;
+  let gpxTracks: GpxTrack[] = [];
+
+  const TRACK_STYLE: L.PolylineOptions = {
+    color: '#ff5a3c',
+    weight: 4,
+    opacity: 0.95,
+  };
 
   const boundsOfLayer = (layer: L.Polygon | L.Rectangle): Bounds => {
     const b = layer.getBounds();
@@ -73,6 +86,27 @@ export function createMap(
   };
 
   const notify = () => onSelectionChange(selectionLayer ? boundsOfLayer(selectionLayer) : null);
+
+  const clearGpxTracks = () => {
+    if (gpxLayer) {
+      gpxLayer.remove();
+      gpxLayer = null;
+    }
+    gpxTracks = [];
+  };
+
+  const setGpxTracks = (tracks: GpxTrack[]) => {
+    clearGpxTracks();
+    gpxTracks = tracks;
+    if (tracks.length === 0) return;
+    gpxLayer = L.layerGroup().addTo(map);
+    for (const track of tracks) {
+      L.polyline(
+        track.map(([lon, lat]) => [lat, lon] as L.LatLngExpression),
+        TRACK_STYLE,
+      ).addTo(gpxLayer);
+    }
+  };
 
   const clearSelection = () => {
     if (selectionLayer) {
@@ -161,12 +195,15 @@ export function createMap(
     map,
     getSelection: () => (selectionLayer ? boundsOfLayer(selectionLayer) : null),
     getFootprint: () => footprint,
+    getGpxTracks: () => gpxTracks,
     flyTo: (b) =>
       map.fitBounds(L.latLngBounds([b.south, b.west], [b.north, b.east]), { maxZoom: 16 }),
     placeRectangle,
     placeCircle,
     placeTriangle,
     placeHeart,
+    setGpxTracks,
+    clearGpxTracks,
     armClickPlace: (handler) => {
       clickPlace = handler;
       map.getContainer().style.cursor = handler ? 'crosshair' : '';

@@ -21,6 +21,8 @@ interface SlabStyle {
 export const ROAD_STYLE: SlabStyle = { liftMm: 0.3, thicknessMm: 1.2 };
 export const WATER_STYLE: SlabStyle = { liftMm: 0.05, thicknessMm: 1.2 };
 export const GREEN_STYLE: SlabStyle = { liftMm: 0.15, thicknessMm: 1.2 };
+/** GPX / parcours — slightly raised so it reads on large relief prints. */
+export const TRACK_STYLE: SlabStyle = { liftMm: 0.55, thicknessMm: 1.6 };
 
 const MIN_AREA_MM2 = 0.8;
 /** Cell size for draping polygons over relief; smaller follows terrain closer. */

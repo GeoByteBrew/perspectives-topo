@@ -1,8 +1,9 @@
 import type { MapController } from './map';
 import { heightMeters, widthMeters, type Bounds } from './geo';
+import { parseGpx, squareAroundTracks } from './gpx';
 import { readCutShape, readPrintMode, updatePrintHint } from './print';
 
-/** Wire étape 1 (zone carrée) + étapes 2–3 (impression / découpe) UI. */
+/** Wire étape 1 (zone carrée + GPX) + étapes 2–3 (impression / découpe) UI. */
 export function setupTools(
   map: MapController,
   opts: {
@@ -77,6 +78,55 @@ export function setupTools(
     zoneSummary.textContent = 'Aucun carré sélectionné.';
     opts.onHint('Étape 1 — placez un carré sur la carte');
     updatePrintHint(null);
+  });
+
+  const gpxInput = document.getElementById('gpx-input') as HTMLInputElement;
+  const gpxSummary = document.getElementById('gpx-summary')!;
+  const btnClearGpx = document.getElementById('btn-clear-gpx') as HTMLButtonElement;
+
+  const showGpxUi = (text: string | null) => {
+    if (!text) {
+      gpxSummary.hidden = true;
+      gpxSummary.textContent = '';
+      btnClearGpx.hidden = true;
+      return;
+    }
+    gpxSummary.hidden = false;
+    gpxSummary.textContent = text;
+    btnClearGpx.hidden = false;
+  };
+
+  gpxInput.addEventListener('change', () => {
+    const file = gpxInput.files?.[0];
+    gpxInput.value = '';
+    if (!file) return;
+    void (async () => {
+      try {
+        const text = await file.text();
+        const tracks = parseGpx(text);
+        map.setGpxTracks(tracks);
+        const zone = squareAroundTracks(tracks);
+        (document.getElementById('sel-side-m') as HTMLInputElement).value = String(
+          Math.round(zone.sideM),
+        );
+        map.placeRectangle(zone.sideM, zone.sideM, zone.center);
+        const pts = tracks.reduce((n, t) => n + t.length, 0);
+        showGpxUi(
+          `GPX « ${file.name} » — ${tracks.length} trace(s), ${pts} points · zone ~${Math.round(zone.sideM)} m`,
+        );
+        opts.onHint('Trace GPX placée — générez le modèle (relief + parcours)');
+      } catch (err) {
+        console.error(err);
+        showGpxUi(null);
+        opts.onHint(err instanceof Error ? err.message : 'Échec de lecture du GPX');
+      }
+    })();
+  });
+
+  btnClearGpx.addEventListener('click', () => {
+    map.clearGpxTracks();
+    showGpxUi(null);
+    opts.onHint('GPX retiré — la zone reste sélectionnée');
   });
 
   // Print mode UI

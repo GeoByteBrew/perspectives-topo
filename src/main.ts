@@ -11,9 +11,11 @@ import {
   buildRoadOverlay,
   mergeSoups,
   ROAD_STYLE,
+  TRACK_STYLE,
   WATER_STYLE,
   GREEN_STYLE,
 } from './geometry/overlays';
+import type { RoadLine } from './overpass';
 import { Preview, type ModelMeta } from './preview';
 import { downloadStl } from './export/stl';
 import { downloadThreeMf, NamedBody } from './export/threeMf';
@@ -28,6 +30,7 @@ const COLORS = {
   roads: 0x4f4a45,
   water: 0x4f81ad,
   green: 0x7aa05e,
+  track: 0xff5a3c,
 };
 
 const el = <T extends HTMLElement>(sel: string): T => document.querySelector<T>(sel)!;
@@ -193,10 +196,27 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
       { name: 'Terrain', geometry: buildTerrain(grid, space, cellMask), color: COLORS.terrain },
     ];
 
+    const add = (name: string, geometry: THREE.BufferGeometry | null, color: number) => {
+      if (geometry) bodies.push({ name, geometry, color });
+    };
+
+    // GPX parcours — always printed when a track is loaded (even without OSM roads).
+    const gpxTracks = mapController.getGpxTracks();
+    if (gpxTracks.length > 0) {
+      setStatus('Projection de la trace GPX…');
+      const trackRoads: RoadLine[] = gpxTracks.map((points) => ({
+        points,
+        // ~2.5 m wide on the ground so it stays readable on large relief prints.
+        widthM: Math.max(2.5, 0.012 * Math.max(buildWM, buildHM)),
+      }));
+      add(
+        'Parcours',
+        buildRoadOverlay(trackRoads, buildBounds, space, dem, TRACK_STYLE, clipFoot),
+        COLORS.track,
+      );
+    }
+
     if (features) {
-      const add = (name: string, geometry: THREE.BufferGeometry | null, color: number) => {
-        if (geometry) bodies.push({ name, geometry, color });
-      };
       const mergeExclude = (a?: Uint8Array | null, b?: Uint8Array | null) => {
         if (!a) return b ?? undefined;
         if (!b) return a;

@@ -285,6 +285,15 @@ body {
   flex: 1;
 }
 
+.gpx-row {
+  margin-top: 4px;
+}
+
+.gpx-label {
+  cursor: pointer;
+  display: inline-flex !important;
+}
+
 #map-pane,
 #preview-pane {
   position: relative;
