@@ -18,7 +18,8 @@ export function setupTools(
 
   const sideM = () => {
     const v = Number((document.getElementById('sel-side-m') as HTMLInputElement).value);
-    return Number.isFinite(v) && v >= 40 ? v : 300;
+    if (!Number.isFinite(v) || v < 40) return 300;
+    return Math.min(20000, v);
   };
 
   const disarmClick = () => {

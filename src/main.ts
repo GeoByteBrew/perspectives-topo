@@ -110,21 +110,32 @@ async function generate(mode: 'first' | 'rebuild'): Promise<void> {
   try {
     const zFactor = Number(el<HTMLInputElement>('#opt-zscale').value) || 1.5;
     const baseMm = Number(el<HTMLInputElement>('#opt-base').value) || 4;
+    const wM = widthMeters(bounds);
+    const hM = heightMeters(bounds);
+    if (wM < 40 || hM < 40) throw new Error('Sélection trop petite — choisissez une plus grande zone.');
+    // Tracking / large relief: up to 20 km. OSM details stay under ~6 km.
+    const MAX_ZONE_M = 20000;
+    const DETAILS_MAX_M = 6000;
+    if (wM > MAX_ZONE_M || hM > MAX_ZONE_M) {
+      throw new Error('Sélection trop grande — restez sous ~20 km (relief / parcours).');
+    }
+
+    const largeForDetails = wM > DETAILS_MAX_M || hM > DETAILS_MAX_M;
+    if (largeForDetails) {
+      // Tracking / grands parcours : relief seul, sans bâtiments ni routes OSM.
+      for (const id of ['#opt-buildings', '#opt-roads', '#opt-water', '#opt-green']) {
+        el<HTMLInputElement>(id).checked = false;
+      }
+      setStatus('Zone > 6 km — relief seul (idéal pour les parcours), sans bâtiments ni routes.');
+    }
+
     const layers = {
       buildings: checked('#opt-buildings'),
       roads: checked('#opt-roads'),
       water: checked('#opt-water'),
       green: checked('#opt-green'),
     };
-    const wantDetails = Object.values(layers).some(Boolean);
-
-    const wM = widthMeters(bounds);
-    const hM = heightMeters(bounds);
-    if (wM < 40 || hM < 40) throw new Error('Sélection trop petite — choisissez une plus grande zone.');
-    if (wM > 60000 || hM > 60000) throw new Error('Sélection trop grande — restez sous ~60 km.');
-    if (wantDetails && (wM > 6000 || hM > 6000)) {
-      throw new Error('Les détails de carte demandent une sélection sous ~6 km — réduisez le carré ou décochez les calques.');
-    }
+    const wantDetails = !largeForDetails && Object.values(layers).some(Boolean);
 
     const print = resolvePrintSize(bounds);
     // Overflow preview: build the full zone at true scale (may exceed 400 mm).

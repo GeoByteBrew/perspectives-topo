@@ -42,16 +42,22 @@
         <aside id="tool-panel" aria-label="Étape 1 — Zone">
           <p class="step-badge">1 · Zone</p>
           <h2>Choisir un carré</h2>
-          <p class="tool-hint">Placez un carré sur la carte (centre ou clic), puis générez.</p>
+          <p class="tool-hint">
+            Carré sur la carte (centre ou clic). Jusqu’à 20 km = relief seul (parcours) ;
+            bâtiments / routes sous ~6 km.
+          </p>
           <div class="preset-row" role="group" aria-label="Carrés prédéfinis">
-            <button type="button" class="preset" data-place="square" data-m="100">100×100 m</button>
-            <button type="button" class="preset" data-place="square" data-m="250">250×250 m</button>
-            <button type="button" class="preset" data-place="square" data-m="500">500×500 m</button>
+            <button type="button" class="preset" data-place="square" data-m="100">100 m</button>
+            <button type="button" class="preset" data-place="square" data-m="500">500 m</button>
+            <button type="button" class="preset" data-place="square" data-m="2000">2 km</button>
+            <button type="button" class="preset" data-place="square" data-m="5000">5 km</button>
+            <button type="button" class="preset" data-place="square" data-m="10000">10 km</button>
+            <button type="button" class="preset" data-place="square" data-m="20000">20 km</button>
           </div>
           <div class="field-row">
             <label>
               Côté
-              <input id="sel-side-m" type="number" min="40" max="6000" step="10" value="300" />
+              <input id="sel-side-m" type="number" min="40" max="20000" step="10" value="300" />
               m
             </label>
             <button type="button" id="btn-place-square" class="tool-btn">Placer</button>
